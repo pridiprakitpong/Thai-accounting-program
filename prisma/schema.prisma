@@ -1,0 +1,259 @@
+generator client {
+  provider   = "prisma-client"
+  output     = "../generated/prisma"
+  engineType = "client"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// A tenant. The MVP signs a user into one company, but rows are always scoped by companyId.
+model Company {
+  id           String             @id @default(cuid())
+  nameTh       String
+  nameEn       String
+  taxId        String             @unique
+  branchCode   String             @default("00000")
+  addressTh    String
+  addressEn    String
+  phone        String             @default("")
+  email        String             @default("")
+  /// Revenue Department e-Filing user id used in the PND text header. Not a password.
+  rdUserId     String             @default("")
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  users        User[]
+  bankAccounts BankAccount[]
+  contacts     Contact[]
+  sequences    DocumentSequence[]
+  sales        SalesDocument[]
+  expenses     Expense[]
+  certificates WhtCertificate[]
+  pp30Returns  Pp30Return[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  companyId    String
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+}
+
+model BankAccount {
+  id            String    @id @default(cuid())
+  companyId     String
+  company       Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  bankName      String
+  accountName   String
+  accountNumber String
+  isDefault     Boolean   @default(false)
+  expenses      Expense[]
+}
+
+model Contact {
+  id          String   @id @default(cuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// customer | vendor | both
+  role        String
+  /// juristic (PND53) | individual (PND3)
+  partyType   String
+  titleTh     String   @default("")
+  titleEn     String   @default("")
+  nameTh      String
+  nameEn      String   @default("")
+  lastNameTh  String   @default("")
+  lastNameEn  String   @default("")
+  taxId       String
+  /// 00000 = head office. Printed as 5 digits; PND export pads to 6.
+  branchCode  String   @default("00000")
+  addressTh   String   @default("")
+  addressEn   String   @default("")
+  phone       String   @default("")
+  email       String   @default("")
+  building    String   @default("")
+  roomNo      String   @default("")
+  floorNo     String   @default("")
+  village     String   @default("")
+  addressNo   String   @default("")
+  moo         String   @default("")
+  soi         String   @default("")
+  street      String   @default("")
+  subdistrict String   @default("")
+  district    String   @default("")
+  province    String   @default("")
+  postalCode  String   @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  sales       SalesDocument[]
+  expenses    Expense[]
+
+  @@index([companyId, role])
+}
+
+model DocumentSequence {
+  id         String  @id @default(cuid())
+  companyId  String
+  company    Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  docType    String
+  year       Int
+  lastNumber Int     @default(0)
+
+  @@unique([companyId, docType, year])
+}
+
+model SalesDocument {
+  id          String      @id @default(cuid())
+  companyId   String
+  company     Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contactId   String
+  contact     Contact     @relation(fields: [contactId], references: [id], onDelete: Restrict)
+  /// quotation | invoice | tax_invoice
+  type        String
+  number      String
+  /// issued | paid | void
+  status      String
+  /// Business dates are YYYY-MM-DD so the tax month cannot shift with time zones.
+  issueDate   String
+  dueDate     String      @default("")
+  /// exclusive | inclusive | none
+  vatMode     String
+  remarks     String      @default("")
+  subtotal    Int
+  vatAmount   Int
+  total       Int
+  paymentDate String      @default("")
+  /// Set when the document is included in a saved PP30 draft. Empty if free.
+  pp30Period  String      @default("")
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  lines       SalesLine[]
+
+  @@unique([companyId, number])
+  @@index([companyId, issueDate])
+  @@index([companyId, pp30Period])
+}
+
+model SalesLine {
+  id         String        @id @default(cuid())
+  documentId String
+  document   SalesDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  position   Int
+  description String
+  /// Thousandths of a unit. 1500 = 1.5
+  quantity   Int
+  unitPrice  Int
+  amount     Int
+}
+
+model Expense {
+  id             String           @id @default(cuid())
+  companyId      String
+  company        Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contactId      String
+  contact        Contact          @relation(fields: [contactId], references: [id], onDelete: Restrict)
+  bankAccountId  String?
+  bankAccount    BankAccount?     @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+  number         String
+  /// unpaid | paid | void
+  status         String
+  category       String
+  billDate       String
+  taxInvoiceNo   String
+  /// Input VAT is claimed in this date's month, not billDate.
+  taxInvoiceDate String
+  /// 0 or 7
+  vatRate        Int
+  notes          String           @default("")
+  subtotal       Int
+  vatAmount      Int
+  whtAmount      Int
+  total          Int
+  netPayable     Int
+  paymentDate    String           @default("")
+  pp30Period     String           @default("")
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  lines          ExpenseLine[]
+  files          ExpenseFile[]
+  certificate    WhtCertificate?
+
+  @@unique([companyId, number])
+  @@index([companyId, taxInvoiceDate])
+  @@index([companyId, status])
+}
+
+model ExpenseLine {
+  id           String  @id @default(cuid())
+  expenseId    String
+  expense      Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  position     Int
+  description  String
+  incomeType   String
+  /// 0, 1, 2, 3, or 5
+  whtRate      Int
+  /// 1 = withheld, 2 = forever, 3 = once. Revenue Department condition code.
+  payCondition String  @default("1")
+  baseAmount   Int
+  vatAmount    Int
+  whtAmount    Int
+}
+
+model ExpenseFile {
+  id         String   @id @default(cuid())
+  expenseId  String
+  expense    Expense  @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  filename   String
+  storedName String
+  mimeType   String
+  size       Int
+  createdAt  DateTime @default(now())
+}
+
+model WhtCertificate {
+  id          String    @id @default(cuid())
+  companyId   String
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  expenseId   String    @unique
+  expense     Expense   @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  number      String
+  /// pnd3 | pnd53
+  formType    String
+  /// draft | confirmed
+  status      String
+  paymentDate String
+  baseAmount  Int
+  taxAmount   Int
+  confirmedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([companyId, number])
+  @@index([companyId, status, paymentDate])
+}
+
+model Pp30Return {
+  id          String   @id @default(cuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  year        Int
+  month       Int
+  period      String
+  status      String   @default("draft")
+  outputVat   Int
+  inputVat    Int
+  carryIn     Int
+  vatPayable  Int
+  excessVat   Int
+  outputCount Int
+  inputCount  Int
+  savedAt     DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([companyId, period])
+}
