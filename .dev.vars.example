@@ -1,0 +1,5 @@
+# Local Worker secrets for `npm run preview` / `wrangler dev`.
+# Copy to .dev.vars. Do not put production values here.
+AUTH_SECRET="local-preview-only-bai-khiao-secret-key"
+ADMIN_EMAIL="admin@bai-khiao.example"
+ADMIN_PASSWORD="LocalAdmin1234!"

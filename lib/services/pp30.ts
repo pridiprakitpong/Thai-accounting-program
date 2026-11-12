@@ -1,6 +1,6 @@
-import type { Prisma, PrismaClient } from "@prisma/client";
-import { prisma } from "../db";
+import { Prisma, type PrismaClient } from "../../generated/prisma/client";
 import { periodKey } from "../format";
+import { withDb } from "../with-db";
 import { buildPp30Series, seriesBounds, type Pp30Month, type VatDocument } from "../tax/pp30";
 
 type Db = Prisma.TransactionClient | PrismaClient;
@@ -84,11 +84,17 @@ async function load(db: Db, companyId: string) {
   return { sales, expenses };
 }
 
-export async function getPp30View(companyId: string, year: number, month: number, db: Db = prisma): Promise<Pp30View> {
+async function defaultDb(): Promise<Db> {
+  const { prisma } = await import("../db");
+  return prisma;
+}
+
+export async function getPp30View(companyId: string, year: number, month: number, db?: Db): Promise<Pp30View> {
+  const database = db ?? (await defaultDb());
   const target = periodKey(year, month);
   const [{ sales, expenses }, savedRow] = await Promise.all([
-    load(db, companyId),
-    db.pp30Return.findUnique({ where: { companyId_period: { companyId, period: target } } }),
+    load(database, companyId),
+    database.pp30Return.findUnique({ where: { companyId_period: { companyId, period: target } } }),
   ]);
   const docs = toDocs(sales, expenses);
   const counted = docs.filter((doc) => doc.active).map((doc) => doc.lockedTo || doc.period);
@@ -124,9 +130,10 @@ export async function getPp30View(companyId: string, year: number, month: number
   };
 }
 
-export async function savePp30Draft(companyId: string, year: number, month: number) {
+export async function savePp30Draft(companyId: string, year: number, month: number, db?: Db) {
   const period = periodKey(year, month);
-  await prisma.$transaction(async (tx) => {
+  const database = (db ?? (await defaultDb())) as PrismaClient;
+  await withDb(database, async (tx) => {
     await tx.salesDocument.updateMany({ where: { companyId, pp30Period: period }, data: { pp30Period: "" } });
     await tx.expense.updateMany({ where: { companyId, pp30Period: period }, data: { pp30Period: "" } });
     const view = await getPp30View(companyId, year, month, tx);

@@ -1,4 +1,5 @@
 import { SignJWT, jwtVerify } from "jose";
+import { authSecret } from "./runtime";
 
 export type SessionToken = {
   uid: string;
@@ -8,7 +9,7 @@ export type SessionToken = {
 };
 
 function key() {
-  const secret = process.env.AUTH_SECRET;
+  const secret = authSecret();
   if (!secret || secret.length < 16) return null;
   return new TextEncoder().encode(secret);
 }

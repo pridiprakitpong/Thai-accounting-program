@@ -1,7 +1,9 @@
 import fs from "fs";
 import path from "path";
-import bcrypt from "bcryptjs";
-import { prisma } from "../lib/db";
+import { createLocalPrisma } from "../lib/local-db";
+import { hashPassword } from "../lib/password";
+
+const prisma = createLocalPrisma();
 import { savePp30Draft } from "../lib/services/pp30";
 import { calculateExpense } from "../lib/tax/expense";
 import { parseMoneyToSatang } from "../lib/tax/money";
@@ -27,6 +29,9 @@ const companyTaxId = "0105569000011";
 
 async function main() {
   loadEnvFile();
+  if (process.env.APP_ENV === "production") {
+    throw new Error("Refusing to seed while APP_ENV=production. Seed is for local development only.");
+  }
   const email = (process.env.DEMO_USER_EMAIL || "demo@bai-khiao.example").toLowerCase();
   const password = process.env.DEMO_USER_PASSWORD || "Demo1234!";
   const name = process.env.DEMO_USER_NAME || "นักบัญชีตัวอย่าง";
@@ -62,7 +67,7 @@ async function main() {
     data: {
       email,
       name,
-      passwordHash: await bcrypt.hash(password, 10),
+      passwordHash: await hashPassword(password),
       companyId: company.id,
     },
   });
@@ -457,8 +462,8 @@ async function main() {
     ],
   });
 
-  await savePp30Draft(company.id, 2026, 10);
-  await savePp30Draft(company.id, 2026, 11);
+  await savePp30Draft(company.id, 2026, 10, prisma);
+  await savePp30Draft(company.id, 2026, 11, prisma);
   console.log(`Seeded ${company.nameEn} for ${email}`);
 }
 

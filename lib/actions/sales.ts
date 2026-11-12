@@ -8,6 +8,7 @@ import { tr } from "../i18n";
 import { getLocale } from "../locale";
 import { parseSalesForm } from "../parse-form";
 import { nextNumber } from "../sequences";
+import { withDb } from "../with-db";
 import { requireUser } from "../session";
 import { todayBangkok } from "../format";
 
@@ -31,7 +32,7 @@ export async function createSales(_prev: ActionState, formData: FormData): Promi
   const owner = await customerOrError(user.companyId, data.contactId, locale);
   if ("error" in owner) return { error: owner.error ?? "" };
   const year = Number(data.issueDate.slice(0, 4));
-  const id = await prisma.$transaction(async (tx) => {
+  const id = await withDb(prisma, async (tx) => {
     const number = await nextNumber(tx, user.companyId, data.type, year, salesPrefix(data.type));
     const created = await tx.salesDocument.create({
       data: {
@@ -84,7 +85,7 @@ export async function updateSales(_prev: ActionState, formData: FormData): Promi
   if (data.type !== existing.type) return { error: tr(locale, "เปลี่ยนประเภทเอกสารไม่ได้", "The document type cannot change.") };
   const owner = await customerOrError(user.companyId, data.contactId, locale);
   if ("error" in owner && owner.error) return { error: owner.error };
-  await prisma.$transaction(async (tx) => {
+  await withDb(prisma, async (tx) => {
     await tx.salesLine.deleteMany({ where: { documentId: id } });
     await tx.salesDocument.update({
       where: { id },
@@ -151,7 +152,7 @@ export async function copyAsTaxInvoice(formData: FormData) {
   if (!doc || doc.status === "void") redirect("/sales");
   const issueDate = todayBangkok();
   const year = Number(issueDate.slice(0, 4));
-  const createdId = await prisma.$transaction(async (tx) => {
+  const createdId = await withDb(prisma, async (tx) => {
     const number = await nextNumber(tx, user.companyId, "tax_invoice", year, "TI");
     const created = await tx.salesDocument.create({
       data: {

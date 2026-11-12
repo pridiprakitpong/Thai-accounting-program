@@ -1,49 +1,17 @@
-import { categoryLabel, incomeType, salesTypeLabel, vatModeLabel } from "../constants";
 import { branchLabel, contactName, formatDate, formatMoney, type NameParts } from "../format";
 import type { Locale } from "../i18n";
 import { tr } from "../i18n";
+import { categoryLabel, incomeType, vatModeLabel } from "../constants";
 import { bahtText, bahtTextEn } from "../tax/baht-text";
 import { formatTaxId } from "../tax/tax-id";
 import { formatQuantity } from "../tax/money";
-import { pdfDocument } from "./render";
+import { green, muted, Sheet } from "./draw";
 
-function esc(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+function clip(value: string, max: number): string {
+  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
 }
 
-const css = `
-  h1{font-size:22px;line-height:1.2;margin:0}
-  .top{display:flex;justify-content:space-between;gap:24px}
-  .brand{font-size:18px;font-weight:700}
-  .muted{color:#5e564c}
-  .kicker{color:#1b5e45;font-weight:700;letter-spacing:.08em;font-size:11px}
-  .doc{text-align:right;min-width:240px}
-  .meta{margin-top:8px;margin-left:auto;border-collapse:collapse}
-  .meta td{padding:2px 0 2px 12px}
-  .party{margin:18px 0;padding:12px 14px;background:#f7f3ea;border-radius:10px}
-  table.lines{width:100%;border-collapse:collapse;margin-top:8px}
-  table.lines th{text-align:left;font-size:12px;color:#5e564c;border-bottom:1px solid #d9d0c2;padding:6px 4px}
-  table.lines td{border-bottom:1px solid #eee6d8;padding:7px 4px;vertical-align:top}
-  .num{text-align:right;font-variant-numeric:tabular-nums}
-  .totals{width:280px;margin-left:auto;margin-top:12px;border-collapse:collapse}
-  .totals td{padding:4px 0}
-  .grand td{font-weight:700;font-size:16px;border-top:1px solid #1c1915;padding-top:8px}
-  .words{margin-top:8px;color:#3d3832}
-  .signs{display:flex;justify-content:space-between;margin-top:42px}
-  .sign{width:42%;text-align:center}
-  .line{margin:36px 16px 6px;border-top:1px solid #1c1915}
-  .void{position:fixed;inset:40%;transform:rotate(-18deg);border:4px solid #8d2f2f;color:#8d2f2f;font-size:42px;font-weight:700;text-align:center;opacity:.35}
-  .box{border:1px solid #1c1915;border-radius:8px;padding:10px 12px;margin-top:10px}
-  .grid2{display:flex;gap:10px}
-  .grid2 .box{flex:1}
-  h2{font-size:16px;margin:0 0 4px}
-`;
-
-export function salesPdfHtml(input: {
+export async function salesPdf(input: {
   locale: Locale;
   company: { nameTh: string; nameEn: string; taxId: string; branchCode: string; addressTh: string; addressEn: string; phone: string; email: string };
   contact: NameParts & { taxId: string; branchCode: string; addressTh: string; addressEn: string };
@@ -60,13 +28,12 @@ export function salesPdfHtml(input: {
     total: number;
     lines: { description: string; quantity: number; unitPrice: number; amount: number }[];
   };
-}) {
+}): Promise<Uint8Array> {
   const { locale, company, contact, document } = input;
   const thai = locale === "th";
+  const sheet = await Sheet.create();
   const companyName = thai || !company.nameEn ? company.nameTh : company.nameEn;
   const address = thai || !company.addressEn ? company.addressTh : company.addressEn;
-  const customer = contactName(contact, locale);
-  const customerAddress = thai || !contact.addressEn ? contact.addressTh : contact.addressEn;
   const paidReceipt = document.type === "tax_invoice" && document.status === "paid";
   const title = thai
     ? document.type === "quotation"
@@ -83,146 +50,117 @@ export function salesPdfHtml(input: {
         : paidReceipt
           ? "Tax invoice / Receipt"
           : "Tax invoice";
-  const subtitle = thai
-    ? document.type === "quotation"
-      ? "QUOTATION"
-      : document.type === "invoice"
-        ? "INVOICE"
-        : paidReceipt
-          ? "TAX INVOICE / RECEIPT"
-          : "TAX INVOICE"
-    : salesTypeLabel(document.type, "th");
+  sheet.draw("BAI KHIAO BOOKS", 40, 800, 9, "semibold", green);
+  sheet.draw(companyName, 40, 780, 16, "bold");
+  sheet.draw(clip(address, 90), 40, 762, 9, "regular", muted);
+  sheet.draw(
+    `${tr(locale, "เลขประจำตัวผู้เสียภาษี", "Tax ID")} ${formatTaxId(company.taxId)} · ${branchLabel(company.branchCode, locale)}`,
+    40,
+    748,
+    9,
+    "regular",
+    muted,
+  );
+  const titleWidth = sheet.widthOf(title, 16, "bold");
+  sheet.draw(title, 555 - titleWidth, 786, 16, "bold");
+  const number = `${tr(locale, "เลขที่", "No.")} ${document.number}`;
+  sheet.draw(number, 555 - sheet.widthOf(number, 10, "semibold"), 766, 10, "semibold");
+  const date = formatDate(document.issueDate, locale);
+  sheet.draw(date, 555 - sheet.widthOf(date, 10), 750, 10, "regular", muted);
+  sheet.y = 724;
+  sheet.band(62);
+  const top = sheet.y + 8;
+  sheet.draw(tr(locale, "ลูกค้า", "Customer"), 52, top, 9, "regular", muted);
+  sheet.draw(contactName(contact, locale), 52, top - 16, 12, "semibold");
+  const customerAddress = thai || !contact.addressEn ? contact.addressTh : contact.addressEn;
+  sheet.draw(clip(customerAddress, 80), 52, top - 32, 9, "regular", muted);
+  sheet.draw(`${formatTaxId(contact.taxId)} · ${branchLabel(contact.branchCode, locale)}`, 52, top - 46, 9, "regular", muted);
+  sheet.y = top - 70;
+  sheet.draw(tr(locale, "รายการ", "Description"), 40, sheet.y, 9, "semibold", muted);
+  sheet.draw(tr(locale, "จำนวน", "Qty"), 340, sheet.y, 9, "semibold", muted);
+  sheet.draw(tr(locale, "ราคา/หน่วย", "Unit price"), 400, sheet.y, 9, "semibold", muted);
+  sheet.draw(tr(locale, "จำนวนเงิน", "Amount"), 490, sheet.y, 9, "semibold", muted);
+  sheet.y -= 8;
+  sheet.rule();
+  for (const line of document.lines) {
+    sheet.ensure(18);
+    sheet.draw(clip(line.description, 42), 40, sheet.y - 11, 10);
+    sheet.draw(formatQuantity(line.quantity), 340, sheet.y - 11, 10);
+    sheet.draw(formatMoney(line.unitPrice, locale), 400, sheet.y - 11, 10);
+    const amount = formatMoney(line.amount, locale);
+    sheet.draw(amount, 555 - sheet.widthOf(amount, 10), sheet.y - 11, 10);
+    sheet.y -= 20;
+  }
+  sheet.rule();
+  const rows: [string, string][] = [
+    [tr(locale, "มูลค่าก่อนภาษี", "Amount before VAT"), formatMoney(document.subtotal, locale)],
+    ...(document.vatMode === "none" ? [] : [[tr(locale, "ภาษีมูลค่าเพิ่ม 7%", "VAT 7%"), formatMoney(document.vatAmount, locale)] as [string, string]]),
+    [tr(locale, "จำนวนเงินรวม", "Total"), formatMoney(document.total, locale)],
+  ];
+  for (const [label, value] of rows) {
+    sheet.draw(label, 360, sheet.y - 12, label.startsWith(tr(locale, "จำนวน", "Total").slice(0, 2)) ? 12 : 10, label === rows[rows.length - 1][0] ? "bold" : "regular");
+    sheet.draw(value, 555 - sheet.widthOf(value, 11, "semibold"), sheet.y - 12, 11, "semibold");
+    sheet.y -= 18;
+  }
   const words = thai ? bahtText(document.total) : bahtTextEn(document.total);
-  const rows = document.lines
-    .map(
-      (line, index) => `<tr>
-        <td>${index + 1}</td>
-        <td>${esc(line.description)}</td>
-        <td class="num">${formatQuantity(line.quantity)}</td>
-        <td class="num">${formatMoney(line.unitPrice, locale)}</td>
-        <td class="num">${formatMoney(line.amount, locale)}</td>
-      </tr>`,
-    )
-    .join("");
-  const vatRow =
-    document.vatMode === "none"
-      ? ""
-      : `<tr><td>${tr(locale, "ภาษีมูลค่าเพิ่ม 7%", "VAT 7%")}</td><td class="num">${formatMoney(document.vatAmount, locale)}</td></tr>`;
-  const body = `<style>${css}</style>
-    ${document.status === "void" ? `<div class="void">${tr(locale, "ยกเลิก", "VOID")}</div>` : ""}
-    <div class="top">
-      <div>
-        <div class="kicker">BAI KHIAO BOOKS</div>
-        <div class="brand">${esc(companyName)}</div>
-        <div>${esc(address)}</div>
-        <div class="muted">${tr(locale, "เลขประจำตัวผู้เสียภาษี", "Tax ID")} ${formatTaxId(company.taxId)} · ${esc(branchLabel(company.branchCode, locale))} (${esc(company.branchCode.padStart(5, "0").slice(-5))})</div>
-        <div class="muted">${esc([company.phone, company.email].filter(Boolean).join(" · "))}</div>
-      </div>
-      <div class="doc">
-        <h1>${esc(title)}</h1>
-        <div class="muted">${esc(subtitle)}</div>
-        <table class="meta">
-          <tr><td class="muted">${tr(locale, "เลขที่", "No.")}</td><td><strong>${esc(document.number)}</strong></td></tr>
-          <tr><td class="muted">${tr(locale, "วันที่", "Date")}</td><td>${esc(formatDate(document.issueDate, locale))}</td></tr>
-          ${document.dueDate ? `<tr><td class="muted">${tr(locale, "ครบกำหนด", "Due")}</td><td>${esc(formatDate(document.dueDate, locale))}</td></tr>` : ""}
-          <tr><td class="muted">VAT</td><td>${esc(vatModeLabel(document.vatMode, locale))}</td></tr>
-        </table>
-      </div>
-    </div>
-    <div class="party">
-      <div class="muted">${tr(locale, "ลูกค้า", "Customer")}</div>
-      <strong>${esc(customer)}</strong>
-      <div>${esc(customerAddress)}</div>
-      <div class="muted">${tr(locale, "เลขประจำตัวผู้เสียภาษี", "Tax ID")} ${formatTaxId(contact.taxId)} · ${esc(branchLabel(contact.branchCode, locale))}</div>
-    </div>
-    <table class="lines">
-      <thead><tr>
-        <th>#</th>
-        <th>${tr(locale, "รายการ", "Description")}</th>
-        <th class="num">${tr(locale, "จำนวน", "Qty")}</th>
-        <th class="num">${tr(locale, "ราคา/หน่วย", "Unit price")}</th>
-        <th class="num">${tr(locale, "จำนวนเงิน", "Amount")}</th>
-      </tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-    <table class="totals">
-      <tr><td>${tr(locale, "มูลค่าก่อนภาษี", "Amount before VAT")}</td><td class="num">${formatMoney(document.subtotal, locale)}</td></tr>
-      ${vatRow}
-      <tr class="grand"><td>${tr(locale, "จำนวนเงินรวม", "Total")}</td><td class="num">${formatMoney(document.total, locale)}</td></tr>
-    </table>
-    <p class="words">(${esc(words)})</p>
-    ${document.remarks ? `<p class="muted">${esc(document.remarks)}</p>` : ""}
-    <div class="signs">
-      <div class="sign"><div class="line"></div>${tr(locale, "ผู้รับเอกสาร", "Received by")}</div>
-      <div class="sign"><div class="line"></div>${tr(locale, "ผู้มีอำนาจลงนาม", "Authorized signature")}<div class="muted">${esc(companyName)}</div></div>
-    </div>`;
-  return pdfDocument(body, thai ? "th" : "en");
+  sheet.text(`(${words})`, { size: 10, color: muted, gap: 16 });
+  sheet.text(vatModeLabel(document.vatMode, locale), { size: 9, color: muted });
+  if (document.remarks) sheet.text(clip(document.remarks, 140), { size: 9, color: muted });
+  if (document.status === "void") sheet.text(tr(locale, "เอกสารนี้ถูกยกเลิก", "This document is void."), { size: 12, weight: "bold" });
+  sheet.y -= 28;
+  sheet.draw(tr(locale, "ผู้รับเอกสาร", "Received by"), 80, sheet.y, 9, "regular", muted);
+  sheet.draw(tr(locale, "ผู้มีอำนาจลงนาม", "Authorized signature"), 360, sheet.y, 9, "regular", muted);
+  sheet.page.drawLine({ start: { x: 60, y: sheet.y - 28 }, end: { x: 200, y: sheet.y - 28 }, thickness: 0.6, color: inkColor() });
+  sheet.page.drawLine({ start: { x: 340, y: sheet.y - 28 }, end: { x: 500, y: sheet.y - 28 }, thickness: 0.6, color: inkColor() });
+  return sheet.bytes();
 }
 
-export function whtPdfHtml(input: {
+function inkColor() {
+  return muted;
+}
+
+export async function whtPdf(input: {
   locale: Locale;
   company: { nameTh: string; nameEn: string; taxId: string; branchCode: string; addressTh: string; addressEn: string };
   contact: NameParts & { taxId: string; branchCode: string; addressTh: string; addressEn: string; partyType: string };
   certificate: { number: string; status: string; paymentDate: string; formType: string; baseAmount: number; taxAmount: number };
   lines: { description: string; incomeType: string; whtRate: number; baseAmount: number; whtAmount: number; payCondition: string }[];
   category: string;
-}) {
+}): Promise<Uint8Array> {
   const { locale, company, contact, certificate, lines } = input;
   const thai = locale === "th";
+  const sheet = await Sheet.create();
+  sheet.draw("BAI KHIAO BOOKS", 40, 800, 9, "semibold", green);
+  sheet.text(thai ? "หนังสือรับรองการหักภาษี ณ ที่จ่าย" : "Withholding tax certificate", { size: 16, weight: "bold", gap: 18 });
+  sheet.y = 770;
+  sheet.text(
+    `${thai ? "ตามมาตรา 50 ทวิ แห่งประมวลรัษฎากร" : "Section 50 bis of the Revenue Code"} · ${certificate.formType === "pnd3" ? "ภ.ง.ด.3" : "ภ.ง.ด.53"} · ${certificate.number}`,
+    { size: 9, color: muted },
+  );
+  sheet.text(`${tr(locale, "วันที่จ่าย", "Payment date")} ${formatDate(certificate.paymentDate, locale)} · ${categoryLabel(input.category, locale)} · ${certificate.status === "confirmed" ? tr(locale, "ยืนยันแล้ว", "Confirmed") : tr(locale, "ฉบับร่าง", "Draft")}`, { size: 9, color: muted, gap: 16 });
   const payer = thai || !company.nameEn ? company.nameTh : company.nameEn;
   const payee = contactName(contact, locale);
-  const rows = lines
-    .map((line) => {
-      const kind = incomeType(line.incomeType);
-      const label = thai ? `${kind.th} (${kind.section})` : `${kind.en} (${kind.section})`;
-      return `<tr>
-        <td>${esc(line.description)}<div class="muted">${esc(label)}</div></td>
-        <td class="num">${esc(formatDate(certificate.paymentDate, locale))}</td>
-        <td class="num">${formatMoney(line.baseAmount, locale)}</td>
-        <td class="num">${line.whtRate.toFixed(2)}</td>
-        <td class="num">${formatMoney(line.whtAmount, locale)}</td>
-      </tr>`;
-    })
-    .join("");
-  const body = `<style>${css}</style>
-    <div class="kicker">BAI KHIAO BOOKS</div>
-    <h1>${thai ? "หนังสือรับรองการหักภาษี ณ ที่จ่าย" : "Withholding tax certificate"}</h1>
-    <div class="muted">${thai ? "ตามมาตรา 50 ทวิ แห่งประมวลรัษฎากร" : "Section 50 bis of the Revenue Code"} · ${certificate.formType === "pnd3" ? "ภ.ง.ด.3" : "ภ.ง.ด.53"} · ${esc(certificate.number)}</div>
-    <div class="grid2">
-      <div class="box">
-        <h2>${tr(locale, "ผู้มีหน้าที่หักภาษี", "Payer")}</h2>
-        <div>${esc(payer)}</div>
-        <div>${esc(thai || !company.addressEn ? company.addressTh : company.addressEn)}</div>
-        <div class="muted">${tr(locale, "เลขประจำตัวผู้เสียภาษี", "Tax ID")} ${formatTaxId(company.taxId)} · ${esc(branchLabel(company.branchCode, locale))}</div>
-      </div>
-      <div class="box">
-        <h2>${tr(locale, "ผู้ถูกหักภาษี", "Payee")}</h2>
-        <div>${esc(payee)}</div>
-        <div>${esc(thai || !contact.addressEn ? contact.addressTh : contact.addressEn)}</div>
-        <div class="muted">${tr(locale, "เลขประจำตัวผู้เสียภาษี", "Tax ID")} ${formatTaxId(contact.taxId)} · ${esc(branchLabel(contact.branchCode, locale))}</div>
-      </div>
-    </div>
-    <p class="muted">${tr(locale, "หมวดค่าใช้จ่าย", "Category")}: ${esc(categoryLabel(input.category, locale))} · ${tr(locale, "วันที่จ่าย", "Payment date")} ${esc(formatDate(certificate.paymentDate, locale))} · ${certificate.status === "confirmed" ? tr(locale, "ยืนยันแล้ว", "Confirmed") : tr(locale, "ฉบับร่าง", "Draft")}</p>
-    <table class="lines">
-      <thead><tr>
-        <th>${tr(locale, "ประเภทเงินได้", "Income")}</th>
-        <th class="num">${tr(locale, "วันที่จ่าย", "Paid")}</th>
-        <th class="num">${tr(locale, "จำนวนเงินที่จ่าย", "Amount")}</th>
-        <th class="num">${tr(locale, "อัตรา", "Rate")}</th>
-        <th class="num">${tr(locale, "ภาษีที่หัก", "Tax")}</th>
-      </tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-    <table class="totals">
-      <tr><td>${tr(locale, "รวมเงินที่จ่าย", "Total paid")}</td><td class="num">${formatMoney(certificate.baseAmount, locale)}</td></tr>
-      <tr class="grand"><td>${tr(locale, "รวมภาษีที่หัก", "Total tax")}</td><td class="num">${formatMoney(certificate.taxAmount, locale)}</td></tr>
-    </table>
-    <p class="words">(${esc(thai ? bahtText(certificate.taxAmount) : bahtTextEn(certificate.taxAmount))})</p>
-    <p>${tr(locale, "ผู้จ่ายเงินได้หักภาษี ณ ที่จ่าย", "The payer withheld tax at source.")}</p>
-    <div class="signs">
-      <div class="sign"><div class="line"></div>${tr(locale, "ผู้ถูกหักภาษี", "Payee")}</div>
-      <div class="sign"><div class="line"></div>${tr(locale, "ผู้มีหน้าที่หักภาษี", "Payer")}<div class="muted">${esc(payer)}</div></div>
-    </div>
-    <p class="muted">${tr(locale, "เอกสารนี้จัดทำจากรายจ่ายที่บันทึกในใบเขียว เพื่อใช้เป็นหนังสือรับรองตามแบบ 50 ทวิ", "Prepared from a recorded expense as a section 50 bis certificate.")}</p>`;
-  return pdfDocument(body, thai ? "th" : "en");
+  sheet.text(tr(locale, "ผู้มีหน้าที่หักภาษี", "Payer"), { size: 9, color: muted, gap: 12 });
+  sheet.text(payer, { size: 12, weight: "semibold", gap: 14 });
+  sheet.text(`${formatTaxId(company.taxId)} · ${branchLabel(company.branchCode, locale)}`, { size: 9, color: muted, gap: 16 });
+  sheet.text(tr(locale, "ผู้ถูกหักภาษี", "Payee"), { size: 9, color: muted, gap: 12 });
+  sheet.text(payee, { size: 12, weight: "semibold", gap: 14 });
+  sheet.text(`${formatTaxId(contact.taxId)} · ${branchLabel(contact.branchCode, locale)}`, { size: 9, color: muted, gap: 18 });
+  sheet.rule();
+  for (const line of lines) {
+    const kind = incomeType(line.incomeType);
+    sheet.ensure(28);
+    sheet.draw(`${line.description} · ${thai ? kind.th : kind.en} (${kind.section})`, 40, sheet.y - 12, 10);
+    const tax = formatMoney(line.whtAmount, locale);
+    sheet.draw(tax, 555 - sheet.widthOf(tax, 10, "semibold"), sheet.y - 12, 10, "semibold");
+    sheet.draw(`${formatMoney(line.baseAmount, locale)} × ${line.whtRate.toFixed(2)}%`, 40, sheet.y - 26, 9, "regular", muted);
+    sheet.y -= 34;
+  }
+  sheet.rule();
+  sheet.text(`${tr(locale, "รวมเงินที่จ่าย", "Total paid")} ${formatMoney(certificate.baseAmount, locale)}`, { size: 11 });
+  sheet.text(`${tr(locale, "รวมภาษีที่หัก", "Total tax")} ${formatMoney(certificate.taxAmount, locale)}`, { size: 13, weight: "bold" });
+  const words = thai ? bahtText(certificate.taxAmount) : bahtTextEn(certificate.taxAmount);
+  sheet.text(`(${words})`, { size: 10, color: muted });
+  sheet.text(tr(locale, "ผู้จ่ายเงินได้หักภาษี ณ ที่จ่าย", "The payer withheld tax at source."), { size: 10 });
+  return sheet.bytes();
 }

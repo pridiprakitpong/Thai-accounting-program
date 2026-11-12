@@ -7,6 +7,7 @@ import { isIsoDate, parseExpenseForm } from "../parse-form";
 import { tr } from "../i18n";
 import { getLocale } from "../locale";
 import { nextNumber } from "../sequences";
+import { withDb } from "../with-db";
 import { requireUser } from "../session";
 import { deleteUpload, saveUpload } from "../uploads";
 import type { ActionState } from "./sales";
@@ -47,7 +48,7 @@ export async function createExpense(_prev: ActionState, formData: FormData): Pro
   const owner = await vendorOrError(user.companyId, data.contactId, locale);
   if ("error" in owner && owner.error) return { error: owner.error };
   const year = Number(data.billDate.slice(0, 4));
-  const id = await prisma.$transaction(async (tx) => {
+  const id = await withDb(prisma, async (tx) => {
     const number = await nextNumber(tx, user.companyId, "expense", year, "EX");
     const created = await tx.expense.create({
       data: {
@@ -111,7 +112,7 @@ export async function updateExpense(_prev: ActionState, formData: FormData): Pro
   if (!data) return { error: tr(locale, "ข้อมูลไม่ถูกต้อง", "Invalid data.") };
   const owner = await vendorOrError(user.companyId, data.contactId, locale);
   if ("error" in owner && owner.error) return { error: owner.error };
-  await prisma.$transaction(async (tx) => {
+  await withDb(prisma, async (tx) => {
     await tx.expenseLine.deleteMany({ where: { expenseId: id } });
     await tx.expense.update({
       where: { id },
@@ -163,7 +164,7 @@ export async function markExpensePaid(formData: FormData) {
   const bank = await prisma.bankAccount.findFirst({ where: { id: bankAccountId, companyId: user.companyId } });
   if (!expense || expense.status === "void" || !bank) redirect(`/expenses/${id}?error=state`);
   if (expense.certificate?.status === "confirmed") redirect(`/expenses/${id}?error=locked`);
-  await prisma.$transaction(async (tx) => {
+  await withDb(prisma, async (tx) => {
     await tx.expense.update({
       where: { id },
       data: { status: "paid", paymentDate, bankAccountId },
@@ -218,7 +219,7 @@ export async function undoExpensePayment(formData: FormData) {
   });
   if (!expense) redirect("/expenses");
   if (expense.certificate?.status === "confirmed") redirect(`/expenses/${id}?error=locked`);
-  await prisma.$transaction(async (tx) => {
+  await withDb(prisma, async (tx) => {
     if (expense.certificate) await tx.whtCertificate.delete({ where: { id: expense.certificate.id } });
     await tx.expense.update({ where: { id }, data: { status: "unpaid", paymentDate: "", bankAccountId: null } });
   });
@@ -274,7 +275,7 @@ export async function voidExpense(formData: FormData) {
   });
   if (!expense) redirect("/expenses");
   if (expense.certificate?.status === "confirmed") redirect(`/expenses/${id}?error=locked`);
-  await prisma.$transaction(async (tx) => {
+  await withDb(prisma, async (tx) => {
     if (expense.certificate) await tx.whtCertificate.delete({ where: { id: expense.certificate.id } });
     await tx.expense.update({ where: { id }, data: { status: "void" } });
   });

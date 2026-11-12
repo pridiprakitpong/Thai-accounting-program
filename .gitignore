@@ -14,3 +14,9 @@ data/uploads/**
 tsconfig.tsbuildinfo
 .DS_Store
 coverage
+/dist/
+.vinext/
+.wrangler/
+/generated/
+.dev.vars
+.agents/

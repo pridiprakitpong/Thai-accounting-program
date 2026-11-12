@@ -13,9 +13,9 @@ A small-company accounting app for Thailand: sales documents, purchase bills, wi
 - A dashboard for the month’s sales, expenses, VAT payable or excess, and unpaid bills.
 - Email and password sign-in. Every row belongs to a company, so more than one company can exist. The app currently signs each user into one company.
 
-## Run it
+## Run it locally
 
-Requirements: Node.js 22, npm, and Chrome or Chromium for PDF export.
+Requirements: Node.js 22 and npm. PDF export does not need Chrome.
 
 ```bash
 cp .env.example .env
@@ -26,16 +26,78 @@ npm test
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3000](http://localhost:3000). This uses SQLite (`prisma/dev.db`, not committed) and stores proof files in `data/uploads/`.
 
 After seeding, sign in with the demo account from `.env.example`:
 
 - Email: `demo@bai-khiao.example`
 - Password: `Demo1234!`
 
-`AUTH_SECRET` signs the session cookie. Change it before sharing a deployment. The database is local SQLite (`prisma/dev.db`) and is not committed. Uploaded proof files go to `data/uploads/`, which is gitignored except for the placeholder.
+The demo account and the seed exist only for this local Next.js server. They are not created on Cloudflare. `AUTH_SECRET` in `.env` signs the local session cookie.
 
-PDF rendering uses the Chrome binary in `CHROME_PATH`. The example leaves it blank and the app tries common install paths. Sarabun is bundled for the PDF under the SIL Open Font License (`assets/fonts/OFL.txt`).
+PDFs are drawn with pdf-lib. Sarabun is embedded from `lib/pdf/font-data.ts` (the font files under `assets/fonts/` are SIL Open Font License, see `assets/fonts/OFL.txt`).
+
+## Cloudflare Workers
+
+The public site runs on Cloudflare Workers through [vinext](https://github.com/cloudflare/vinext) (`@vinext/cloudflare`), which fits this Next.js 15 app and keeps `wrangler.jsonc`. OpenNext was the other option; vinext is the one wired up here. `npm run dev` stays on Next.js and SQLite. `npm run preview` builds the Worker and serves it with a local D1 database and R2 bucket.
+
+```bash
+cp .dev.vars.example .dev.vars
+npm run preview
+```
+
+Preview listens on [http://127.0.0.1:8787](http://127.0.0.1:8787). `.dev.vars` is gitignored. The example values are for that local preview only:
+
+- `AUTH_SECRET` signs the session.
+- `ADMIN_EMAIL` and `ADMIN_PASSWORD` are the only credentials `/setup` will accept.
+
+On first launch, open `/setup`, enter that email and password, and create the company. The page redirects to sign-in once any user exists. `APP_ENV=production` is set on the Worker, so the login page does not offer the demo account and `prisma db seed` refuses to run.
+
+Nothing has been deployed. The account `2141c75d142de588f4d6f28bf197a08e` is in `wrangler.jsonc`. D1 database `bai-khiao` and R2 bucket `bai-khiao-files` are not created yet. `database_id` is a placeholder. The first GitHub Actions run creates both, writes the real D1 id, applies `migrations/`, and deploys. Do not put a real company, password, or API token in the repo.
+
+### Scripts
+
+| Script | What it does |
+| --- | --- |
+| `npm run dev` | Next.js on SQLite |
+| `npm run build` | Prisma client, Worker-safe query compiler, vinext build |
+| `npm run preview` | Build, apply the D1 migration locally, `wrangler dev` |
+| `npm run deploy` | Build and `vinext-cloudflare deploy` (do not run until the token is ready) |
+
+### Secrets to set before the first real request
+
+These are Worker secrets, not GitHub secrets and not files in the repo:
+
+```bash
+npx wrangler secret put AUTH_SECRET
+npx wrangler secret put ADMIN_EMAIL
+npx wrangler secret put ADMIN_PASSWORD
+```
+
+Use a long random `AUTH_SECRET`. `ADMIN_EMAIL` and `ADMIN_PASSWORD` must match what you type on `/setup`. After the first admin exists, `/setup` locks itself.
+
+### GitHub Actions
+
+`.github/workflows/deploy.yml` runs on push to `main`. It installs, creates D1 and R2 if they are missing, runs `wrangler d1 migrations apply bai-khiao --remote`, and deploys. Add these repository secrets:
+
+- `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_ACCOUNT_ID` = `2141c75d142de588f4d6f28bf197a08e`
+
+Create the token on that account only. The first deploy creates a Worker that does not exist yet, so the token needs account-level edit, not a per-script editor token. In the dashboard that is:
+
+- Account → Account Settings → Read
+- Account → Workers Scripts → Edit
+- Account → D1 → Edit
+- Account → Workers R2 Storage → Edit
+
+The API permission names are Account Settings Read, Workers Scripts Write, D1 Write, and Workers R2 Storage Write. Workers Scripts Write creates and updates the Worker and is what `wrangler secret put` uses. D1 Write creates the database and applies migrations. Workers R2 Storage Write creates the bucket. The Worker reads and writes objects through the `FILES` binding, so the token does not need object access.
+
+### Workers limits
+
+- D1's Prisma adapter throws if you use an interactive `$transaction`. The Worker runs those statements one after another (`lib/with-db.ts`). Local SQLite still uses a real transaction. Two requests can race on a document number.
+- Workers refuse `new WebAssembly.Module()` / `WebAssembly.compile()`. Prisma's query compiler is uploaded already compiled (`scripts/patch-prisma-worker.mjs`). The local preview bundle is about 2.4MB gzipped, under the 3MB free-plan script limit, with not much room to spare.
+- Chrome cannot run inside a Worker. PDFs are pdf-lib plus fontkit's browser build, with Sarabun embedded. Thai marks are positioned with fontkit's layout. The PND Excel file uses ExcelJS and the text file is plain text; both responded successfully in `wrangler dev`.
+- Proof files go to the `FILES` R2 bucket (`receipts/…`). PDFs are generated when someone downloads them and are not stored.
 
 ## Demo story
 
@@ -68,4 +130,4 @@ The tests cover exclusive, inclusive, and zero VAT; mixed withholding rates; the
 - Choosing a later input-VAT month inside the six-month claim window.
 - e-Tax invoice submission and a direct filing connection. The text file still needs the real e-Filing user id.
 - Snapshots of the payee on a confirmed certificate, an audit log, and emailing documents.
-- Postgres and object storage for a hosted deployment. The schema uses ordinary strings, integers, and relations so it can move off SQLite.
+- A hosted database with real transactions. Cloudflare D1 is wired up, and local development stays on SQLite. D1 cannot wrap the document-number and PP.30 writes in one transaction.

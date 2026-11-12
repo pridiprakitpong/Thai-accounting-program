@@ -1,9 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { readSession } from "@/lib/auth-token";
+import { preloadBindings } from "@/lib/runtime";
 
-const PUBLIC_PATHS = new Set(["/", "/login", "/api/auth/login", "/api/auth/logout"]);
+const PUBLIC_PATHS = new Set(["/", "/login", "/setup", "/api/auth/login", "/api/auth/logout"]);
 
 export async function middleware(request: NextRequest) {
+  await preloadBindings();
   const { pathname } = request.nextUrl;
   const token = request.cookies.get("bk_session")?.value;
   const session = token ? await readSession(token) : null;

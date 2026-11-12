@@ -3,10 +3,12 @@ import { redirect } from "next/navigation";
 import { readSession } from "./auth-token";
 import { prisma } from "./db";
 import { getLocale } from "./locale";
+import { preloadBindings } from "./runtime";
 
 export const SESSION_COOKIE = "bk_session";
 
 export async function getSessionUser() {
+  await preloadBindings();
   const jar = await cookies();
   const token = jar.get(SESSION_COOKIE)?.value;
   if (!token) return null;

@@ -1,11 +1,16 @@
 import Link from "next/link";
 import { LanguageToggle } from "@/components/language-toggle";
+import { prisma } from "@/lib/db";
 import { tr } from "@/lib/i18n";
 import { getLocale } from "@/lib/locale";
+import { isProduction, preloadBindings } from "@/lib/runtime";
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+  await preloadBindings();
   const locale = await getLocale();
   const query = await searchParams;
+  const needsSetup = (await prisma.user.count()) === 0;
+  const demo = !isProduction();
   return (
     <div className="login-wrap">
       <section className="login-brand">
@@ -35,10 +40,15 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
             </div>
           </div>
           {query.error ? <div className="alert">{tr(locale, "อีเมลหรือรหัสผ่านไม่ถูกต้อง", "Email or password is incorrect.")}</div> : null}
+          {needsSetup ? (
+            <p className="notice">
+              <Link href="/setup">{tr(locale, "ตั้งค่าผู้ดูแลคนแรก", "Create the first admin")}</Link>
+            </p>
+          ) : null}
           <form action="/api/auth/login" method="post" className="stack">
             <label className="field">
               <span>{tr(locale, "อีเมล", "Email")}</span>
-              <input name="email" type="email" autoComplete="username" required defaultValue="demo@bai-khiao.example" />
+              <input name="email" type="email" autoComplete="username" required defaultValue={demo ? "demo@bai-khiao.example" : ""} />
             </label>
             <label className="field">
               <span>{tr(locale, "รหัสผ่าน", "Password")}</span>
@@ -48,11 +58,13 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
               {tr(locale, "เข้าสู่ระบบ", "Sign in")}
             </button>
           </form>
-          <div className="creds">
-            <div>{tr(locale, "บัญชีตัวอย่างหลังสั่ง seed", "Demo account after seeding")}</div>
-            <strong>demo@bai-khiao.example</strong>
-            <div>Demo1234!</div>
-          </div>
+          {demo ? (
+            <div className="creds">
+              <div>{tr(locale, "บัญชีตัวอย่างหลังสั่ง seed ในเครื่องเท่านั้น", "Local demo account after seeding")}</div>
+              <strong>demo@bai-khiao.example</strong>
+              <div>Demo1234!</div>
+            </div>
+          ) : null}
         </div>
       </section>
     </div>

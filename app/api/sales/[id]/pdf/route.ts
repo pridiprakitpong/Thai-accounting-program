@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { htmlToPdf } from "@/lib/pdf/render";
-import { salesPdfHtml } from "@/lib/pdf/templates";
+import { salesPdf } from "@/lib/pdf/templates";
 import { getSessionUser } from "@/lib/session";
 import type { Locale } from "@/lib/i18n";
 
@@ -18,14 +17,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   });
   if (!doc) return new NextResponse("Not found", { status: 404 });
   try {
-    const pdf = await htmlToPdf(
-      salesPdfHtml({
-        locale: lang as Locale,
-        company: doc.company,
-        contact: doc.contact,
-        document: doc,
-      }),
-    );
+    const pdf = await salesPdf({
+      locale: lang as Locale,
+      company: doc.company,
+      contact: doc.contact,
+      document: doc,
+    });
     return new NextResponse(Buffer.from(pdf), {
       headers: {
         "Content-Type": "application/pdf",
